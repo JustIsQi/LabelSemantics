@@ -48,6 +48,8 @@ class ExcelConversionConfig:
     label_descriptions: dict[str, str] | None = None
     train_ratio: float = 0.8
     dev_ratio: float = 0.1
+    holdout_labels: tuple[str, ...] = ("C", "CODE", "IND")
+    max_holdout_frequency: int = 5
     seed: int = 42
     max_report_items: int = 500
 
@@ -249,13 +251,78 @@ def deduplicate_examples(examples):
     return deduplicated, len(examples) - len(deduplicated), conflicting_queries
 
 
-def split_examples_by_query(examples, train_ratio, dev_ratio, seed):
+def extract_labeled_mentions(query, labels, holdout_labels):
+    mentions = set()
+    label_set = set(holdout_labels)
+    index = 0
+    while index < len(labels):
+        label = labels[index]
+        if not label.startswith("B-"):
+            index += 1
+            continue
+
+        entity_type = label[2:]
+        end = index + 1
+        while end < len(labels) and labels[end] == f"I-{entity_type}":
+            end += 1
+
+        if entity_type in label_set:
+            mentions.add((entity_type, query[index:end]))
+        index = end
+    return mentions
+
+
+def split_examples_by_holdout_mentions(
+    examples,
+    train_ratio,
+    dev_ratio,
+    seed,
+    holdout_labels,
+    max_holdout_frequency,
+):
+    parents = list(range(len(examples)))
+    example_mentions = [
+        extract_labeled_mentions(query, labels, holdout_labels)
+        for query, labels in examples
+    ]
+    mention_counts = defaultdict(int)
+    for mentions in example_mentions:
+        for mention in mentions:
+            mention_counts[mention] += 1
+    protected_mentions = {
+        mention
+        for mention, count in mention_counts.items()
+        if count <= max_holdout_frequency
+    }
+
+    def find(index):
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left, right):
+        left_root, right_root = find(left), find(right)
+        if left_root != right_root:
+            parents[right_root] = left_root
+
+    mention_owner = {}
+    for index, (query, _) in enumerate(examples):
+        grouping_keys = {("__QUERY__", query)} | (example_mentions[index] & protected_mentions)
+        for mention in grouping_keys:
+            owner = mention_owner.get(mention)
+            if owner is None:
+                mention_owner[mention] = index
+            else:
+                union(owner, index)
+
     grouped = defaultdict(list)
-    for query, labels in examples:
-        grouped[query].append((query, labels))
+    for index, example in enumerate(examples):
+        grouped[find(index)].append(example)
 
     groups = list(grouped.values())
     random.Random(seed).shuffle(groups)
+    groups.sort(key=len, reverse=True)
 
     total = len(examples)
     train_target = int(total * train_ratio)
@@ -271,7 +338,31 @@ def split_examples_by_query(examples, train_ratio, dev_ratio, seed):
             split_name = "test.txt"
         splits[split_name].extend(group)
 
-    return {"all.txt": examples, **splits}
+    return {"all.txt": examples, **splits}, groups, protected_mentions
+
+
+def summarize_holdout_overlap(splits, holdout_labels, protected_mentions=None):
+    split_mentions = {}
+    for filename, split_examples in splits.items():
+        if filename == "all.txt":
+            continue
+        mentions = set()
+        for query, labels in split_examples:
+            mentions.update(extract_labeled_mentions(query, labels, holdout_labels))
+        if protected_mentions is not None:
+            mentions &= protected_mentions
+        split_mentions[filename] = mentions
+
+    overlaps = {}
+    split_names = sorted(split_mentions)
+    for index, left in enumerate(split_names):
+        for right in split_names[index + 1:]:
+            overlaps[f"{left}:{right}"] = len(split_mentions[left] & split_mentions[right])
+
+    return {
+        "mention_counts": {name: len(mentions) for name, mentions in split_mentions.items()},
+        "cross_split_overlap_counts": overlaps,
+    }
 
 
 def convert_excel_to_bio(config=None):
@@ -317,7 +408,14 @@ def convert_excel_to_bio(config=None):
 
     original_example_count = len(examples)
     examples, duplicate_count, conflicting_query_count = deduplicate_examples(examples)
-    splits = split_examples_by_query(examples, config.train_ratio, config.dev_ratio, config.seed)
+    splits, holdout_groups, protected_mentions = split_examples_by_holdout_mentions(
+        examples,
+        config.train_ratio,
+        config.dev_ratio,
+        config.seed,
+        config.holdout_labels,
+        config.max_holdout_frequency,
+    )
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     for filename, split_examples in splits.items():
@@ -332,6 +430,17 @@ def convert_excel_to_bio(config=None):
     report["source_examples"] = original_example_count
     report["duplicate_examples_removed"] = duplicate_count
     report["conflicting_label_queries"] = conflicting_query_count
+    report["holdout_labels"] = list(config.holdout_labels)
+    report["max_holdout_frequency"] = config.max_holdout_frequency
+    report["protected_holdout_mentions"] = len(protected_mentions)
+    report["holdout_group_count"] = len(holdout_groups)
+    report["largest_holdout_group"] = len(holdout_groups[0]) if holdout_groups else 0
+    report["protected_holdout_overlap"] = summarize_holdout_overlap(
+        splits,
+        config.holdout_labels,
+        protected_mentions,
+    )
+    report["full_holdout_overlap"] = summarize_holdout_overlap(splits, config.holdout_labels)
     report["splits"] = {filename: len(split_examples) for filename, split_examples in splits.items()}
     report["labels"] = used_labels
     compact_report(report, config.max_report_items)
@@ -355,6 +464,8 @@ def parse_args():
     parser.add_argument("--entity-columns", default="company_entities,other_entities")
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--dev-ratio", type=float, default=0.1)
+    parser.add_argument("--holdout-labels", default="C,CODE,IND")
+    parser.add_argument("--max-holdout-frequency", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-report-items", type=int, default=500)
     return parser.parse_args()
@@ -370,6 +481,8 @@ def main():
             entity_columns=tuple(column.strip() for column in args.entity_columns.split(",") if column.strip()),
             train_ratio=args.train_ratio,
             dev_ratio=args.dev_ratio,
+            holdout_labels=tuple(label.strip() for label in args.holdout_labels.split(",") if label.strip()),
+            max_holdout_frequency=args.max_holdout_frequency,
             seed=args.seed,
             max_report_items=args.max_report_items,
         )

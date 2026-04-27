@@ -1,7 +1,7 @@
 {
   "input_file": "test_data_0413.xlsx",
   "total_rows": 38349,
-  "written_examples": 38349,
+  "written_examples": 37231,
   "matched_mentions": 268298,
   "match_modes": {
     "exact": 266104,
@@ -13514,11 +13514,47 @@
       "raw": "行业/概念|光伏|申万行业分类-2"
     }
   ],
+  "source_examples": 38349,
+  "duplicate_examples_removed": 1118,
+  "conflicting_label_queries": 129,
+  "holdout_labels": [
+    "C",
+    "CODE",
+    "IND"
+  ],
+  "max_holdout_frequency": 5,
+  "protected_holdout_mentions": 10067,
+  "holdout_group_count": 25227,
+  "largest_holdout_group": 9,
+  "protected_holdout_overlap": {
+    "mention_counts": {
+      "train.txt": 8512,
+      "dev.txt": 802,
+      "test.txt": 753
+    },
+    "cross_split_overlap_counts": {
+      "dev.txt:test.txt": 0,
+      "dev.txt:train.txt": 0,
+      "test.txt:train.txt": 0
+    }
+  },
+  "full_holdout_overlap": {
+    "mention_counts": {
+      "train.txt": 10603,
+      "dev.txt": 2548,
+      "test.txt": 2527
+    },
+    "cross_split_overlap_counts": {
+      "dev.txt:test.txt": 1480,
+      "dev.txt:train.txt": 1744,
+      "test.txt:train.txt": 1772
+    }
+  },
   "splits": {
-    "all.txt": 38349,
-    "train.txt": 30679,
-    "dev.txt": 3835,
-    "test.txt": 3835
+    "all.txt": 37231,
+    "train.txt": 29784,
+    "dev.txt": 3723,
+    "test.txt": 3724
   },
   "labels": [
     "C",
