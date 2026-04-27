@@ -3,6 +3,7 @@ import json
 import random
 import unicodedata
 import xml.etree.ElementTree as ET
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from zipfile import ZipFile
@@ -232,6 +233,47 @@ def compact_report(report, max_items):
     report["max_report_items"] = max_items
 
 
+def deduplicate_examples(examples):
+    deduplicated = []
+    seen = set()
+    query_labels = defaultdict(set)
+    for query, labels in examples:
+        label_tuple = tuple(labels)
+        key = (query, label_tuple)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduplicated.append((query, labels))
+        query_labels[query].add(label_tuple)
+    conflicting_queries = sum(1 for labels in query_labels.values() if len(labels) > 1)
+    return deduplicated, len(examples) - len(deduplicated), conflicting_queries
+
+
+def split_examples_by_query(examples, train_ratio, dev_ratio, seed):
+    grouped = defaultdict(list)
+    for query, labels in examples:
+        grouped[query].append((query, labels))
+
+    groups = list(grouped.values())
+    random.Random(seed).shuffle(groups)
+
+    total = len(examples)
+    train_target = int(total * train_ratio)
+    dev_target = int(total * dev_ratio)
+    splits = {"train.txt": [], "dev.txt": [], "test.txt": []}
+
+    for group in groups:
+        if len(splits["train.txt"]) < train_target:
+            split_name = "train.txt"
+        elif len(splits["dev.txt"]) < dev_target:
+            split_name = "dev.txt"
+        else:
+            split_name = "test.txt"
+        splits[split_name].extend(group)
+
+    return {"all.txt": examples, **splits}
+
+
 def convert_excel_to_bio(config=None):
     config = config or ExcelConversionConfig()
     rows = read_xlsx_rows(config.input_file)
@@ -273,15 +315,9 @@ def convert_excel_to_bio(config=None):
         labels = apply_entities(query, entity_rows, report, config.type_to_label, config.ignored_types)
         examples.append((query, labels))
 
-    random.Random(config.seed).shuffle(examples)
-    train_end = int(len(examples) * config.train_ratio)
-    dev_end = int(len(examples) * (config.train_ratio + config.dev_ratio))
-    splits = {
-        "all.txt": examples,
-        "train.txt": examples[:train_end],
-        "dev.txt": examples[train_end:dev_end],
-        "test.txt": examples[dev_end:],
-    }
+    original_example_count = len(examples)
+    examples, duplicate_count, conflicting_query_count = deduplicate_examples(examples)
+    splits = split_examples_by_query(examples, config.train_ratio, config.dev_ratio, config.seed)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     for filename, split_examples in splits.items():
@@ -293,6 +329,9 @@ def convert_excel_to_bio(config=None):
         output.write("\n")
 
     report["written_examples"] = len(examples)
+    report["source_examples"] = original_example_count
+    report["duplicate_examples_removed"] = duplicate_count
+    report["conflicting_label_queries"] = conflicting_query_count
     report["splits"] = {filename: len(split_examples) for filename, split_examples in splits.items()}
     report["labels"] = used_labels
     compact_report(report, config.max_report_items)
