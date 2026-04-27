@@ -1,0 +1,11 @@
+python train.py \
+  --model-path /home/chinese-roberta-wwm-ext \
+  --data-dir excel_ner_data \
+  --label-file excel_ner_data/labels.json \
+  --train-file train.txt \
+  --dev-file dev.txt \
+  --test-file test.txt \
+  --output-dir outputs/pretrain \
+  --batch-size 16 \
+  --epochs 100 \
+  --learning-rate 1e-5

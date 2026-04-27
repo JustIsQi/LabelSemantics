@@ -116,7 +116,7 @@ bash scripts/train_full.sh
 
 ```bash
 python train.py \
-  --model-path //home/chinese-roberta-wwm-ext \
+  --model-path /home/chinese-roberta-wwm-ext \
   --data-dir excel_ner_data \
   --label-file excel_ner_data/labels.json \
   --train-file train.txt \

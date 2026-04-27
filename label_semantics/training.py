@@ -32,6 +32,10 @@ class TrainConfig:
     device: str | None = None
 
 
+def log(message):
+    print(message, flush=True)
+
+
 def load_features(config, tokenizer, tag2id, filename):
     tokens, labels = read_bio_file(config.data_dir / filename, sep=config.sep)
     return encode_bio_examples(tokens, labels, tokenizer, tag2id, config.max_length)
@@ -57,17 +61,25 @@ def evaluate(model, dataloader, id2tag, device):
 
 def train(config):
     device = torch.device(config.device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    log(f"Using device: {device}")
+    log(f"Loading labels from {config.label_file}")
     label_descriptions = load_label_descriptions(config.label_file)
     tag2id, id2tag = build_tag_maps(label_descriptions)
+    log(f"Loading tokenizer from {config.model_name_or_path}")
     tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path, use_fast=True)
 
+    log(f"Encoding train data: {config.data_dir / config.train_file}")
     train_features = load_features(config, tokenizer, tag2id, config.train_file)
+    log(f"Encoding dev data: {config.data_dir / config.dev_file}")
     dev_features = load_features(config, tokenizer, tag2id, config.dev_file)
     train_loader = build_dataloader(train_features, config.batch_size, shuffle=True)
     dev_loader = build_dataloader(dev_features, config.batch_size)
+    log(f"Built dataloaders: train_steps={len(train_loader)} dev_steps={len(dev_loader)}")
 
+    log(f"Loading model from {config.model_name_or_path}")
     model = LabelSemanticsNER(config.model_name_or_path, tag2id, label_descriptions).to(device)
     if config.checkpoint_path:
+        log(f"Loading checkpoint from {config.checkpoint_path}")
         model.load_state_dict(torch.load(config.checkpoint_path, map_location=device), strict=False)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
@@ -81,6 +93,7 @@ def train(config):
 
     best_f1 = 0.0
     for epoch in range(config.epochs):
+        log(f"Starting epoch {epoch}")
         model.train()
         total_loss = 0.0
         steps = 0
@@ -102,10 +115,10 @@ def train(config):
             total_loss += loss.item()
             steps += 1
             if step % 30 == 0:
-                print(f"epoch={epoch} step={step} train_loss={total_loss / steps:.6f}")
+                log(f"epoch={epoch} step={step} train_loss={total_loss / steps:.6f}")
 
         metrics = evaluate(model, dev_loader, id2tag, device)
-        print(
+        log(
             f"epoch={epoch} train_loss={total_loss / max(steps, 1):.6f} "
             f"precision={metrics['precision']:.6f} recall={metrics['recall']:.6f} f1={metrics['f1']:.6f}"
         )
@@ -117,7 +130,7 @@ def train(config):
         test_features = load_features(config, tokenizer, tag2id, config.test_file)
         test_loader = build_dataloader(test_features, config.batch_size)
         test_metrics = evaluate(model, test_loader, id2tag, device)
-        print(
+        log(
             f"test precision={test_metrics['precision']:.6f} "
             f"recall={test_metrics['recall']:.6f} f1={test_metrics['f1']:.6f}"
         )
