@@ -17,23 +17,24 @@ try:
     from transformers import AutoTokenizer
 
     from label_semantics.labels import build_tag_maps, load_label_descriptions
-    from label_semantics.metrics import get_entities
+    from label_semantics.postprocess import decode_entities
     from label_semantics.model import LabelSemanticsNER
 except ModuleNotFoundError as exc:
     torch = None
     AutoTokenizer = None
     build_tag_maps = None
     load_label_descriptions = None
-    get_entities = None
+    decode_entities = None
     LabelSemanticsNER = None
     DEPENDENCY_ERROR = exc
 
 try:
-    from openpyxl import Workbook
+    from openpyxl import Workbook, load_workbook
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.utils import get_column_letter
 except ModuleNotFoundError as exc:
     Workbook = None
+    load_workbook = None
     Alignment = None
     Font = None
     PatternFill = None
@@ -44,7 +45,7 @@ except ModuleNotFoundError as exc:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Batch-test entity extraction with a self-contained model directory.")
-    parser.add_argument("--input-file", default="data/eval.jsonl")
+    parser.add_argument("--input-file", default="data/eval_entities.xlsx")
     parser.add_argument(
         "--model-path",
         default="outputs/best_model",
@@ -75,25 +76,50 @@ def load_jsonl(path, limit=None):
     return rows
 
 
-# Characters that should never appear at the start/end of an entity span. These are
-# typical separators between enumerated companies/brokers in the training data
-# ("中信证券、中金公司"), plus generic whitespace and ASCII/CJK punctuation.
-ENTITY_BOUNDARY_STRIP_CHARS = set(
-    " \t\u3000、，,。.；;：:!！?？/\\()()[]【】《》<>\"'`~“”‘’\r\n"
-)
+def split_excel_mentions(value):
+    if value is None:
+        return []
+    text = str(value).strip()
+    if not text:
+        return []
+    # Keep commas inside English legal names, e.g. "IO Biotech, Inc.".
+    return [part.strip() for part in re.split(r"[;；、\n]+", text) if part.strip()]
 
 
-def trim_entity_span(query, start, end):
-    """Trim leading/trailing punctuation or whitespace from a predicted span.
+def load_xlsx(path, limit=None):
+    rows = []
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    worksheet = workbook.active
+    header_row = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+    if not header_row:
+        return rows
 
-    Returns (new_start, new_end). If everything is trimmed away, returns a span where
-    ``new_start > new_end`` so the caller can drop it.
-    """
-    while start <= end and query[start] in ENTITY_BOUNDARY_STRIP_CHARS:
-        start += 1
-    while end >= start and query[end] in ENTITY_BOUNDARY_STRIP_CHARS:
-        end -= 1
-    return start, end
+    headers = [str(value).strip() if value is not None else "" for value in header_row]
+    for row_number, values in enumerate(worksheet.iter_rows(min_row=2, values_only=True), start=2):
+        if limit is not None and len(rows) >= limit:
+            break
+
+        row = {
+            header: values[index] if index < len(values) and values[index] is not None else ""
+            for index, header in enumerate(headers)
+            if header
+        }
+        query = str(row.get("ori_query", "")).strip()
+        if not query:
+            continue
+        row["ori_query"] = query
+        row["_excel_row"] = row_number
+        rows.append(row)
+    return rows
+
+
+def load_input_rows(path, limit=None):
+    suffix = Path(path).suffix.lower()
+    if suffix in {".xlsx", ".xlsm"}:
+        return load_xlsx(path, limit)
+    if suffix == ".jsonl":
+        return load_jsonl(path, limit)
+    raise ValueError(f"Unsupported input file type: {path}")
 
 
 def encode_query(query, tokenizer, max_length, device):
@@ -134,15 +160,7 @@ def predict_entities(query, model, tokenizer, id2tag, label_descriptions, max_le
         tags[word_id] = id2tag[pred_id]
         previous_word_id = word_id
 
-    entities = {label: [] for label in label_descriptions}
-    for entity_type, start, end in get_entities(tags):
-        if entity_type not in entities:
-            continue
-        start, end = trim_entity_span(query, start, end)
-        if start > end:
-            continue
-        entities[entity_type].append(query[start:end + 1])
-    return entities
+    return decode_entities(query, tags, label_descriptions)
 
 
 def normalize_mentions(mentions):
@@ -192,6 +210,7 @@ def gold_entities_from_row(row, label_descriptions):
         "BROKER": ("institutions",),
         "IND": ("industries",),
         "CODE": ("codes", "code"),
+        "PRODUCT": ("products",),
         "TIME": ("times", "time"),
     }
     query = row.get("ori_query", "")
@@ -199,7 +218,10 @@ def gold_entities_from_row(row, label_descriptions):
     for label in label_descriptions:
         values = []
         for key in keys_by_label.get(label, (label.lower(),)):
-            values.extend(raw_entities.get(key, []))
+            if raw_entities:
+                values.extend(raw_entities.get(key, []))
+            else:
+                values.extend(split_excel_mentions(row.get(key, "")))
         if label == "TIME":
             values.extend(extract_time_mentions(query))
         entities[label] = values
@@ -411,7 +433,7 @@ def main():
     model = LabelSemanticsNER(args.model_path, tag2id, label_descriptions).to(device)
     model.eval()
 
-    rows = load_jsonl(args.input_file, args.limit)
+    rows = load_input_rows(args.input_file, args.limit)
     print(f"Loaded {len(rows)} rows from {args.input_file}", flush=True)
 
     for row in rows[:args.warmup]:

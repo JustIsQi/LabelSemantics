@@ -6,7 +6,13 @@ from torch.nn import CrossEntropyLoss
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 from .constants import IGNORE_INDEX
-from .data import build_dataloader, encode_bio_examples, read_bio_file, shuffle_features
+from .data import (
+    augment_role_suffix,
+    build_dataloader,
+    encode_bio_examples,
+    read_bio_file,
+    shuffle_features,
+)
 from .labels import build_tag_maps, load_label_descriptions
 from .metrics import entity_f1
 from .model import LabelSemanticsNER
@@ -30,14 +36,34 @@ class TrainConfig:
     max_grad_norm: float = 1.0
     sep: str = "\t"
     device: str | None = None
+    # Per-sentence probability for ``augment_role_suffix``. 0.0 disables it
+    # (default, preserves legacy behaviour). 0.3-0.5 is a reasonable range
+    # for real training; the augmenter teaches the model that
+    # "<broker/company> + <role/title/verb>" closes the entity boundary,
+    # which fixes overshoot like "中信证券分析师明明" -> BROKER.
+    augment_role_prob: float = 0.0
+    augment_role_seed: int = 0
 
 
 def log(message):
     print(message, flush=True)
 
 
-def load_features(config, tokenizer, tag2id, filename):
+def load_features(config, tokenizer, tag2id, filename, augment_role_prob=0.0):
     tokens, labels = read_bio_file(config.data_dir / filename, sep=config.sep)
+    if augment_role_prob > 0.0:
+        import random
+
+        rng = random.Random(config.augment_role_seed)
+        extra_tokens, extra_labels = augment_role_suffix(
+            tokens, labels, prob=augment_role_prob, rng=rng,
+        )
+        log(
+            f"augment_role_suffix: original={len(tokens)} extra={len(extra_tokens)} "
+            f"prob={augment_role_prob}"
+        )
+        tokens = tokens + extra_tokens
+        labels = labels + extra_labels
     return encode_bio_examples(tokens, labels, tokenizer, tag2id, config.max_length)
 
 
@@ -69,7 +95,10 @@ def train(config):
     tokenizer = AutoTokenizer.from_pretrained(config.model_name_or_path, use_fast=True)
 
     log(f"Encoding train data: {config.data_dir / config.train_file}")
-    train_features = load_features(config, tokenizer, tag2id, config.train_file)
+    train_features = load_features(
+        config, tokenizer, tag2id, config.train_file,
+        augment_role_prob=config.augment_role_prob,
+    )
     train_features = shuffle_features(train_features)
     log(f"Shuffled train features: num_examples={train_features['input_ids'].size(0)}")
     log(f"Encoding dev data: {config.data_dir / config.dev_file}")

@@ -10,5 +10,6 @@ python -m label_semantics.train \
   --test-file test.txt \
   --output-dir outputs/pretrain \
   --batch-size 16 \
-  --epochs 100 \
+  --epochs 30 \
   --learning-rate 1e-5
+  # --augment-role-prob 0.4

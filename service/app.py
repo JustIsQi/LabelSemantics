@@ -1,8 +1,10 @@
 """FastAPI app exposing the LabelSemantics NER model.
 
-Inference logic mirrors ``tests/batch_test.py`` (encode_query / predict_entities /
-trim_entity_span / extract_time_mentions / normalize_entities) so that the HTTP
-service produces predictions identical to the batch evaluation script.
+Inference logic mirrors ``tests/batch_test.py``. Tagging post-processing
+(BIO decode + boundary trim + role-suffix trim) lives in
+``label_semantics.postprocess.decode_entities`` and is shared by both
+modules so the HTTP service and the offline batch evaluator always produce
+identical predictions.
 
 Configuration is read from environment variables so the same module can be
 launched directly with ``uvicorn service.app:app --workers N``:
@@ -14,10 +16,13 @@ launched directly with ``uvicorn service.app:app --workers N``:
 - ``LS_WARMUP_QUERIES``  optional ``;`` separated warmup queries
 - ``LS_INCLUDE_TIME_REGEX``  ``1`` to also merge regex-extracted TIME mentions
   into the response (mirrors ``gold_entities_from_row`` in batch_test); default ``0``.
+- ``LS_BROKER_ENTITY_FILE``  JSON list of known broker names; default
+  ``data/securities_firm_src_org_names.json``.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -38,8 +43,8 @@ from pydantic import BaseModel, Field
 from transformers import AutoTokenizer
 
 from label_semantics.labels import build_tag_maps, load_label_descriptions
-from label_semantics.metrics import get_entities
 from label_semantics.model import LabelSemanticsNER
+from label_semantics.postprocess import decode_entities
 
 logger = logging.getLogger("label_semantics.service")
 
@@ -54,10 +59,10 @@ except ImportError:  # pragma: no cover
 
 
 # --- inference helpers (kept in sync with tests/batch_test.py) ---------------
-
-ENTITY_BOUNDARY_STRIP_CHARS = set(
-    " \t\u3000、，,。.；;：:!！?？/\\()()[]【】《》<>\"'`~“”‘’\r\n"
-)
+#
+# BIO decoding + boundary trimming + role-suffix trimming are imported from
+# ``label_semantics.postprocess.decode_entities`` so that this service and the
+# offline batch evaluation script always agree on the post-processing rules.
 
 TIME_PATTERNS = (
     r"截至\d{4}年\d{1,2}月\d{1,2}日",
@@ -75,14 +80,6 @@ TIME_PATTERNS = (
     r"Q[1-4]",
 )
 TIME_RE = re.compile("|".join(f"(?:{pattern})" for pattern in TIME_PATTERNS))
-
-
-def trim_entity_span(query: str, start: int, end: int):
-    while start <= end and query[start] in ENTITY_BOUNDARY_STRIP_CHARS:
-        start += 1
-    while end >= start and query[end] in ENTITY_BOUNDARY_STRIP_CHARS:
-        end -= 1
-    return start, end
 
 
 def encode_query(query: str, tokenizer, max_length: int, device: torch.device):
@@ -139,15 +136,7 @@ def predict_entities(
         tags[word_id] = id2tag[pred_id]
         previous_word_id = word_id
 
-    entities: Dict[str, List[str]] = {label: [] for label in label_descriptions}
-    for entity_type, start, end in get_entities(tags):
-        if entity_type not in entities:
-            continue
-        start, end = trim_entity_span(query, start, end)
-        if start > end:
-            continue
-        entities[entity_type].append(query[start:end + 1])
-    return entities
+    return decode_entities(query, tags, label_descriptions)
 
 
 def predict_entities_timed(
@@ -195,14 +184,7 @@ def predict_entities_timed(
         tags[word_id] = id2tag[pred_id]
         previous_word_id = word_id
 
-    entities: Dict[str, List[str]] = {label: [] for label in label_descriptions}
-    for entity_type, start, end in get_entities(tags):
-        if entity_type not in entities:
-            continue
-        start, end = trim_entity_span(query, start, end)
-        if start > end:
-            continue
-        entities[entity_type].append(query[start:end + 1])
+    entities = decode_entities(query, tags, label_descriptions)
     t3 = time.perf_counter()
 
     timings = {
@@ -238,6 +220,37 @@ def normalize_entities(
     return out
 
 
+def load_broker_entities(path: str) -> set[str]:
+    broker_path = Path(path)
+    if not broker_path.exists():
+        logger.warning("broker entity file not found: %s", broker_path)
+        return set()
+
+    with broker_path.open("r", encoding="utf-8") as input_file:
+        data = json.load(input_file)
+
+    if isinstance(data, dict):
+        data = data.get("entities", data.get("names", []))
+    if not isinstance(data, list):
+        raise ValueError(f"broker entity file must contain a JSON list: {broker_path}")
+
+    return {str(value).strip() for value in data if str(value).strip()}
+
+
+def merge_known_brokers_from_company(
+    entities: Dict[str, List[str]],
+    broker_entities: set[str],
+) -> None:
+    if not broker_entities or "C" not in entities or "BROKER" not in entities:
+        return
+
+    brokers = set(entities["BROKER"])
+    for entity in entities["C"]:
+        if entity in broker_entities:
+            brokers.add(entity)
+    entities["BROKER"] = sorted(brokers)
+
+
 # --- per-worker model bundle -------------------------------------------------
 
 
@@ -253,6 +266,7 @@ class ModelBundle:
         device: torch.device,
         max_length: int,
         merge_time_regex: bool,
+        broker_entities: set[str],
     ):
         self.tokenizer = tokenizer
         self.model = model
@@ -261,6 +275,7 @@ class ModelBundle:
         self.device = device
         self.max_length = max_length
         self.merge_time_regex = merge_time_regex
+        self.broker_entities = broker_entities
         # The model + label cache are not thread-safe to mutate concurrently, so
         # we serialize inference within a single worker and rely on multi-worker
         # processes for parallelism.
@@ -290,6 +305,9 @@ def _build_bundle() -> ModelBundle:
         "true",
         "yes",
     )
+    broker_entity_file = _resolve_path(
+        os.environ.get("LS_BROKER_ENTITY_FILE", "data/securities_firm_src_org_names.json")
+    )
 
     device = torch.device(device_name)
     pid = os.getpid()
@@ -303,6 +321,8 @@ def _build_bundle() -> ModelBundle:
 
     label_descriptions = load_label_descriptions(label_file)
     tag2id, id2tag = build_tag_maps(label_descriptions)
+    broker_entities = load_broker_entities(broker_entity_file)
+    logger.info("[pid=%s] loaded %s broker entities", pid, len(broker_entities))
 
     tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
     model = LabelSemanticsNER(model_path, tag2id, label_descriptions).to(device)
@@ -332,6 +352,7 @@ def _build_bundle() -> ModelBundle:
         device=device,
         max_length=max_length,
         merge_time_regex=merge_time_regex,
+        broker_entities=broker_entities,
     )
 
 
@@ -488,6 +509,7 @@ def _run_predict(bundle: ModelBundle, query: str, include_time_regex: Optional[b
     if use_time_regex and "TIME" in entities:
         merged = set(entities["TIME"]) | set(extract_time_mentions(query))
         entities["TIME"] = sorted(m for m in merged if m)
+    merge_known_brokers_from_company(entities, bundle.broker_entities)
     handler_ms = (time.perf_counter() - handler_start) * 1000
 
     timings = {

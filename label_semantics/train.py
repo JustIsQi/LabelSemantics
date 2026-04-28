@@ -22,6 +22,18 @@ def parse_args():
     parser.add_argument("--max-grad-norm", type=float, default=1.0)
     parser.add_argument("--sep", default="\t")
     parser.add_argument("--device", default=None)
+    parser.add_argument(
+        "--augment-role-prob",
+        type=float,
+        default=0.0,
+        help=(
+            "Per-sentence probability for the BROKER/C role-suffix data augmenter "
+            "(see label_semantics.data.augment_role_suffix). 0.0 disables it. "
+            "Recommend 0.3-0.5 to teach the model that '<broker/company> + "
+            "<role/title/verb>' closes the entity boundary."
+        ),
+    )
+    parser.add_argument("--augment-role-seed", type=int, default=0)
     return parser.parse_args()
 
 
@@ -44,6 +56,8 @@ def main():
         max_grad_norm=args.max_grad_norm,
         sep=args.sep,
         device=args.device,
+        augment_role_prob=args.augment_role_prob,
+        augment_role_seed=args.augment_role_seed,
     )
     train(config)
 

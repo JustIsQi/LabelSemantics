@@ -25,7 +25,7 @@ The gaps tell you where to optimize:
 Examples
 --------
 
-    python tests/fastapi_single_test.py "茅台2023年的营收"
+    python tests/fastapi_single_test.py "银河证券、国泰海通、招商证券去年增资哪些行业"
     python tests/fastapi_single_test.py --base-url http://127.0.0.1:8000 "中信证券Q1研报"
     python tests/fastapi_single_test.py --repeat 5 "比亚迪最近股价表现"
 """
