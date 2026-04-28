@@ -13,6 +13,7 @@ DEFAULT_TYPE_TO_LABEL = {
     "机构-公司": "C",
     "机构-代码": "CODE",
     "行业/概念": "IND",
+    "券商": "BROKER",
     "时间": "TIME",
 }
 
@@ -29,6 +30,7 @@ DEFAULT_LABEL_DESCRIPTIONS = {
     "C": "公司",
     "CODE": "机构代码",
     "IND": "行业概念",
+    "BROKER": "券商",
     "TIME": "时间",
 }
 
@@ -39,8 +41,8 @@ RID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 
 @dataclass
 class ExcelConversionConfig:
-    input_file: Path = Path("test_data_0413.xlsx")
-    output_dir: Path = Path("excel_ner_data")
+    input_file: Path = Path("data/test_data_0413.xlsx")
+    output_dir: Path = Path("data/excel_ner_data")
     query_column: str = "Query"
     entity_columns: tuple[str, ...] = ("company_entities", "other_entities")
     type_to_label: dict[str, str] | None = None
@@ -48,7 +50,7 @@ class ExcelConversionConfig:
     label_descriptions: dict[str, str] | None = None
     train_ratio: float = 0.8
     dev_ratio: float = 0.1
-    holdout_labels: tuple[str, ...] = ("C", "CODE", "IND")
+    holdout_labels: tuple[str, ...] = ("C", "CODE", "IND", "BROKER")
     max_holdout_frequency: int = 5
     seed: int = 42
     max_report_items: int = 500
@@ -88,7 +90,12 @@ def read_xlsx_rows(path):
         all_rows = []
         for sheet in workbook.findall(".//a:sheet", MAIN_NS):
             target = rid_to_target[sheet.attrib[RID]]
-            sheet_path = "xl/" + target.lstrip("/") if not target.startswith("xl/") else target
+            normalized_target = target.lstrip("/")
+            sheet_path = (
+                normalized_target
+                if normalized_target.startswith("xl/")
+                else f"xl/{normalized_target}"
+            )
             root = ET.fromstring(archive.read(sheet_path))
             for row in root.findall(".//a:sheetData/a:row", MAIN_NS):
                 values = []
@@ -458,13 +465,13 @@ def convert_excel_to_bio(config=None):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Convert annotated Excel rows to BIO files.")
-    parser.add_argument("--input-file", default="test_data_0413.xlsx")
-    parser.add_argument("--output-dir", default="excel_ner_data")
+    parser.add_argument("--input-file", default="data/test_data_0413.xlsx")
+    parser.add_argument("--output-dir", default="data/excel_ner_data")
     parser.add_argument("--query-column", default="Query")
     parser.add_argument("--entity-columns", default="company_entities,other_entities")
     parser.add_argument("--train-ratio", type=float, default=0.8)
     parser.add_argument("--dev-ratio", type=float, default=0.1)
-    parser.add_argument("--holdout-labels", default="C,CODE,IND")
+    parser.add_argument("--holdout-labels", default="C,CODE,IND,BROKER")
     parser.add_argument("--max-holdout-frequency", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-report-items", type=int, default=500)

@@ -1,14 +1,14 @@
 import argparse
 from pathlib import Path
 
-from label_semantics.training import TrainConfig, train
+from .training import TrainConfig, train
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train a label-semantics NER model.")
     parser.add_argument("--model-path", required=True, help="HuggingFace model name or local model path.")
-    parser.add_argument("--data-dir", default="excel_ner_data", help="Directory containing BIO train/dev/test files.")
-    parser.add_argument("--label-file", default="excel_ner_data/labels.json", help="Label description JSON.")
+    parser.add_argument("--data-dir", default="data/excel_ner_data", help="Directory containing BIO train/dev/test files.")
+    parser.add_argument("--label-file", default="data/excel_ner_data/labels.json", help="Label description JSON.")
     parser.add_argument("--train-file", default="train.txt")
     parser.add_argument("--dev-file", default="dev.txt")
     parser.add_argument("--test-file", default=None)

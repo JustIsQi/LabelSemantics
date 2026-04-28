@@ -1,8 +1,9 @@
 import inspect
+from pathlib import Path
 
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 from .constants import DEFAULT_BIO_PREFIX_TEXT, DEFAULT_OUTSIDE_LABEL_TEXT
 
@@ -17,8 +18,14 @@ class LabelSemanticsNER(nn.Module):
         outside_label_text=DEFAULT_OUTSIDE_LABEL_TEXT,
     ):
         super().__init__()
-        self.token_encoder = AutoModel.from_pretrained(model_name_or_path)
-        self.label_encoder = AutoModel.from_pretrained(model_name_or_path)
+        finetuned_state_dict = self._maybe_load_finetuned_state_dict(model_name_or_path)
+        if finetuned_state_dict is None:
+            self.token_encoder = AutoModel.from_pretrained(model_name_or_path)
+            self.label_encoder = AutoModel.from_pretrained(model_name_or_path)
+        else:
+            config = AutoConfig.from_pretrained(model_name_or_path)
+            self.token_encoder = AutoModel.from_config(config)
+            self.label_encoder = AutoModel.from_config(config)
         self.accepts_token_type_ids = "token_type_ids" in inspect.signature(self.token_encoder.forward).parameters
         self.label_tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
         self.tag2id = tag2id
@@ -26,6 +33,29 @@ class LabelSemanticsNER(nn.Module):
         self.bio_prefix_text = bio_prefix_text or DEFAULT_BIO_PREFIX_TEXT
         self.outside_label_text = outside_label_text
         self.register_buffer("cached_label_representation", torch.empty(0), persistent=False)
+        if finetuned_state_dict is not None:
+            self.load_state_dict(finetuned_state_dict, strict=False)
+
+    @staticmethod
+    def _maybe_load_finetuned_state_dict(model_name_or_path):
+        model_dir = Path(str(model_name_or_path))
+        if not model_dir.is_dir():
+            return None
+        bin_path = model_dir / "pytorch_model.bin"
+        if not bin_path.is_file():
+            return None
+        state_dict = torch.load(bin_path, map_location="cpu")
+        if isinstance(state_dict, dict) and "model_state_dict" in state_dict:
+            state_dict = state_dict["model_state_dict"]
+        if not isinstance(state_dict, dict):
+            return None
+        has_label_semantics_keys = any(
+            isinstance(key, str) and key.startswith(("token_encoder.", "label_encoder."))
+            for key in state_dict
+        )
+        if not has_label_semantics_keys:
+            return None
+        return state_dict
 
     @property
     def device(self):

@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
-excel_ner_data/all.txt
+data/excel_ner_data/
 outputs/
 save_models/
 fewshot/
+docs/
+tests/*.xlsx

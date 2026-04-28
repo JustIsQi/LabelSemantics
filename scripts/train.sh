@@ -1,7 +1,10 @@
-python train.py \
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/.."
+
+python -m label_semantics.train \
   --model-path /home/chinese-roberta-wwm-ext \
-  --data-dir excel_ner_data \
-  --label-file excel_ner_data/labels.json \
+  --data-dir data/excel_ner_data \
+  --label-file data/excel_ner_data/labels.json \
   --train-file train.txt \
   --dev-file dev.txt \
   --test-file test.txt \

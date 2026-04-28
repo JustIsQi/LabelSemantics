@@ -78,6 +78,12 @@ def encode_bio_examples(tokens, labels, tokenizer, tag2id, max_length):
     }
 
 
+def shuffle_features(features, generator=None):
+    num_examples = features["input_ids"].size(0)
+    perm = torch.randperm(num_examples, generator=generator)
+    return {key: tensor[perm] for key, tensor in features.items()}
+
+
 def build_dataset(features):
     return TensorDataset(
         features["input_ids"],

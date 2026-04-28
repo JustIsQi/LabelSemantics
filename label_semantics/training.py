@@ -6,7 +6,7 @@ from torch.nn import CrossEntropyLoss
 from transformers import AutoTokenizer, get_linear_schedule_with_warmup
 
 from .constants import IGNORE_INDEX
-from .data import build_dataloader, encode_bio_examples, read_bio_file
+from .data import build_dataloader, encode_bio_examples, read_bio_file, shuffle_features
 from .labels import build_tag_maps, load_label_descriptions
 from .metrics import entity_f1
 from .model import LabelSemanticsNER
@@ -70,6 +70,8 @@ def train(config):
 
     log(f"Encoding train data: {config.data_dir / config.train_file}")
     train_features = load_features(config, tokenizer, tag2id, config.train_file)
+    train_features = shuffle_features(train_features)
+    log(f"Shuffled train features: num_examples={train_features['input_ids'].size(0)}")
     log(f"Encoding dev data: {config.data_dir / config.dev_file}")
     dev_features = load_features(config, tokenizer, tag2id, config.dev_file)
     train_loader = build_dataloader(train_features, config.batch_size, shuffle=True)

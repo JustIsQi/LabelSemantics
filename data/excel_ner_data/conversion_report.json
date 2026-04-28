@@ -8258,13 +8258,13 @@
     {
       "start": 37,
       "end": 41,
-      "label": "C",
+      "label": "BROKER",
       "mention": "恒泰证券",
-      "type": "机构-公司",
+      "type": "券商",
       "match_mode": "exact",
       "row": 74,
       "query": "东方财富、同花顺2022-2024年净利润对比，大智慧、指南针、财富趋势、恒泰证券、国联证券、华林证券同期净利润是否与证券行情活跃度相关，八者互联网金融用户流量争夺对净利润的影响怎样？",
-      "raw": "机构-公司|恒泰证券|金融街证券股份有限公司"
+      "raw": "券商|恒泰证券|金融街证券股份有限公司"
     },
     {
       "start": 0,
@@ -13520,17 +13520,18 @@
   "holdout_labels": [
     "C",
     "CODE",
-    "IND"
+    "IND",
+    "BROKER"
   ],
   "max_holdout_frequency": 5,
-  "protected_holdout_mentions": 10067,
-  "holdout_group_count": 25227,
+  "protected_holdout_mentions": 10068,
+  "holdout_group_count": 25228,
   "largest_holdout_group": 9,
   "protected_holdout_overlap": {
     "mention_counts": {
-      "train.txt": 8512,
-      "dev.txt": 802,
-      "test.txt": 753
+      "train.txt": 8516,
+      "dev.txt": 777,
+      "test.txt": 775
     },
     "cross_split_overlap_counts": {
       "dev.txt:test.txt": 0,
@@ -13540,14 +13541,14 @@
   },
   "full_holdout_overlap": {
     "mention_counts": {
-      "train.txt": 10603,
-      "dev.txt": 2548,
-      "test.txt": 2527
+      "train.txt": 10609,
+      "dev.txt": 2535,
+      "test.txt": 2553
     },
     "cross_split_overlap_counts": {
-      "dev.txt:test.txt": 1480,
-      "dev.txt:train.txt": 1744,
-      "test.txt:train.txt": 1772
+      "dev.txt:test.txt": 1494,
+      "dev.txt:train.txt": 1758,
+      "test.txt:train.txt": 1778
     }
   },
   "splits": {
@@ -13557,6 +13558,7 @@
     "test.txt": 3724
   },
   "labels": [
+    "BROKER",
     "C",
     "CODE",
     "IND",

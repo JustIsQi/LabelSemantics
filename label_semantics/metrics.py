@@ -1,7 +1,14 @@
 from .constants import IGNORE_INDEX
 
 
-def get_entities(tags):
+def get_entities(tags, strict=True):
+    """Decode BIO tag sequence into ``(type, start, end)`` spans.
+
+    When ``strict=True`` (default) an ``I-X`` tag whose previous tag is not the same
+    entity type is treated as ``O`` instead of opening a new span. This avoids the
+    boundary-overflow case where a noisy ``I-X`` prediction at a separator (e.g. "、")
+    glues two adjacent entities together or seeds a spurious one-character entity.
+    """
     start = -1
     entity_type = None
     entities = []
@@ -18,12 +25,24 @@ def get_entities(tags):
         else:
             prefix, current_type = "B", tag
 
-        if prefix == "B" or entity_type != current_type:
+        if prefix == "B":
             if entity_type is not None:
                 entities.append((entity_type, start, index - 1))
             start = index
             entity_type = current_type
+        elif prefix == "I" and entity_type == current_type:
+            continue
+        elif prefix == "I" and entity_type is not None and entity_type != current_type:
+            entities.append((entity_type, start, index - 1))
+            if strict:
+                start = -1
+                entity_type = None
+            else:
+                start = index
+                entity_type = current_type
         elif prefix == "I" and entity_type is None:
+            if strict:
+                continue
             start = index
             entity_type = current_type
 
