@@ -34,6 +34,23 @@ def parse_args():
         ),
     )
     parser.add_argument("--augment-role-seed", type=int, default=0)
+    parser.add_argument(
+        "--contrastive-weight",
+        type=float,
+        default=0.0,
+        help="Weight for the supervised contrastive auxiliary loss. 0.0 disables it.",
+    )
+    parser.add_argument(
+        "--contrastive-temperature",
+        type=float,
+        default=0.1,
+        help="Temperature for the supervised contrastive auxiliary loss.",
+    )
+    parser.add_argument(
+        "--contrastive-label",
+        default="C",
+        help="Entity label to focus the contrastive auxiliary loss on.",
+    )
     return parser.parse_args()
 
 
@@ -58,6 +75,9 @@ def main():
         device=args.device,
         augment_role_prob=args.augment_role_prob,
         augment_role_seed=args.augment_role_seed,
+        contrastive_weight=args.contrastive_weight,
+        contrastive_temperature=args.contrastive_temperature,
+        contrastive_label=args.contrastive_label,
     )
     train(config)
 

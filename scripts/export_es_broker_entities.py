@@ -20,6 +20,13 @@ from urllib import request as urllib_request
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_ORG_TYPES = (
+    "证券研究机构",
+    "港台研究机构",
+    "期货机构",
+    "基金/信托",
+    "国际研究机构",
+)
 
 
 def _resolve_path(value: str) -> Path:
@@ -81,10 +88,13 @@ def export_entities(args: argparse.Namespace) -> List[str]:
     index = urllib_parse.quote(args.index, safe="")
     search_url = f"{base_url}/{index}/_search?scroll={urllib_parse.quote(args.scroll)}"
 
+    filters = [{"exists": {"field": args.field}}]
+    if args.org_types:
+        filters.append({"terms": {args.org_type_field: args.org_types}})
     payload = {
         "size": args.batch_size,
         "_source": [args.field],
-        "query": {"exists": {"field": args.field}},
+        "query": {"bool": {"filter": filters}},
     }
     response = _json_request(
         search_url,
@@ -151,6 +161,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--index", default="securities_firm_with_pinyin")
     parser.add_argument("--field", default="SRC_ORG_NAME")
+    parser.add_argument("--org-type-field", default="ORG_TYPE.keyword")
+    parser.add_argument(
+        "--org-types",
+        default=",".join(DEFAULT_ORG_TYPES),
+        help=(
+            "Comma-separated ORG_TYPE allowlist. Empty string disables filtering. "
+            f"Default: {','.join(DEFAULT_ORG_TYPES)}"
+        ),
+    )
     parser.add_argument(
         "--output",
         default="data/securities_firm_src_org_names.json",
@@ -164,6 +183,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    args.org_types = [
+        value.strip()
+        for value in str(args.org_types).split(",")
+        if value.strip()
+    ]
     output_path = _resolve_path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -21,6 +21,7 @@
 ├── scripts/                         # 工具脚本与 shell 包装
 │   ├── convert_excel_to_bio.py      # Excel 标注转 BIO CLI
 │   ├── convert_checkpoint_to_model_dir.py  # 把 .pth checkpoint 打包为可分发模型目录
+│   ├── export_es_company_names.py   # 用 ES 英文公司名生成增强版 Excel
 │   └── train.sh                     # 一键训练脚本
 ├── tests/                           # 评估 / 批量测试脚本
 │   ├── batch_test.py                # 用 eval.jsonl 跑模型并输出 Excel 评估报告
@@ -80,6 +81,19 @@ BIO 文件每行一个字符和标签，用 tab 分隔：
 
 ```bash
 python scripts/convert_excel_to_bio.py
+```
+
+如需增强英文公司名，先从 ES 的 `base_company.en_company_name` 读取真实英文公司名，并追加生成增强版 Excel：
+
+```bash
+python scripts/export_es_company_names.py \
+  --input-file data/test_data_0413.xlsx \
+  --output-file data/test_data_0413_en_augmented.xlsx \
+  --max-examples 5000
+
+python scripts/convert_excel_to_bio.py \
+  --input-file data/test_data_0413_en_augmented.xlsx \
+  --output-dir data/excel_ner_data_en_augmented
 ```
 
 当前标签规则：

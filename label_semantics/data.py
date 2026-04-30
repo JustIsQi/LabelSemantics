@@ -1,4 +1,5 @@
 import random
+import re
 from pathlib import Path
 
 import torch
@@ -33,6 +34,8 @@ _ROLE_SUFFIX_POOLS = {
     "BROKER": _BROKER_ROLE_SUFFIX_POOL,
     "C": _COMPANY_ROLE_SUFFIX_POOL,
 }
+
+_ASCII_ALPHA_RE = re.compile(r"[A-Za-z]")
 
 
 def _iter_entities(label_row):
@@ -110,6 +113,14 @@ def augment_role_suffix(tokens, labels, prob=0.3, rng=None, max_examples=None):
     return extra_tokens, extra_labels
 
 
+def has_ascii_alpha(text):
+    return bool(_ASCII_ALPHA_RE.search(text))
+
+
+def is_ascii_alpha_token(token):
+    return len(token) == 1 and token.isascii() and token.isalpha()
+
+
 def read_bio_file(path, sep="\t"):
     tokens, labels = [], []
     current_tokens, current_labels = [], []
@@ -146,6 +157,7 @@ def encode_bio_examples(tokens, labels, tokenizer, tag2id, max_length):
         "token_type_ids": [],
         "attention_mask": [],
         "labels": [],
+        "english_mask": [],
     }
 
     for token_row, label_row in zip(tokens, labels):
@@ -159,26 +171,32 @@ def encode_bio_examples(tokens, labels, tokenizer, tag2id, max_length):
         )
         word_ids = inputs.word_ids(batch_index=0)
         aligned_labels = []
+        english_mask = []
         previous_word_idx = None
         for word_idx in word_ids:
             if word_idx is None:
                 aligned_labels.append(IGNORE_INDEX)
+                english_mask.append(0)
             elif word_idx != previous_word_idx:
                 aligned_labels.append(tag2id[label_row[word_idx]])
+                english_mask.append(int(is_ascii_alpha_token(token_row[word_idx])))
             else:
                 aligned_labels.append(IGNORE_INDEX)
+                english_mask.append(0)
             previous_word_idx = word_idx
 
         encoded["input_ids"].append(inputs["input_ids"])
         encoded["token_type_ids"].append(inputs.get("token_type_ids", torch.zeros_like(inputs["input_ids"])))
         encoded["attention_mask"].append(inputs["attention_mask"])
         encoded["labels"].append(aligned_labels)
+        encoded["english_mask"].append(english_mask)
 
     return {
         "input_ids": torch.cat(encoded["input_ids"], dim=0),
         "token_type_ids": torch.cat(encoded["token_type_ids"], dim=0),
         "attention_mask": torch.cat(encoded["attention_mask"], dim=0),
         "labels": torch.tensor(encoded["labels"], dtype=torch.long),
+        "english_mask": torch.tensor(encoded["english_mask"], dtype=torch.bool),
     }
 
 
@@ -194,6 +212,7 @@ def build_dataset(features):
         features["attention_mask"],
         features["token_type_ids"],
         features["labels"],
+        features["english_mask"],
     )
 
 

@@ -85,7 +85,14 @@ class LabelSemanticsNER(nn.Module):
     def reset_label_cache(self):
         self.cached_label_representation = torch.empty(0, device=self.device)
 
-    def forward(self, input_ids, attention_mask, token_type_ids=None, use_label_cache=False):
+    def forward(
+        self,
+        input_ids,
+        attention_mask,
+        token_type_ids=None,
+        use_label_cache=False,
+        return_representations=False,
+    ):
         if use_label_cache and self.cached_label_representation.numel() > 0:
             label_representation = self.cached_label_representation
         else:
@@ -106,4 +113,6 @@ class LabelSemanticsNER(nn.Module):
         expanded_labels = label_representation.expand(batch_size, label_count, hidden_size)
         logits = torch.matmul(token_embeddings, expanded_labels.transpose(2, 1))
         predictions = torch.argmax(logits, dim=-1)
+        if return_representations:
+            return logits, predictions, token_embeddings, label_representation
         return logits, predictions

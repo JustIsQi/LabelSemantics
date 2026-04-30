@@ -59,7 +59,7 @@ def parse_args():
     )
     parser.add_argument(
         "--checkpoint-dir",
-        default="outputs/pretrain",
+        default="outputs/english_contrastive",
         help="Directory to scan for the best .pth when --checkpoint-path is omitted.",
     )
     parser.add_argument(
@@ -69,7 +69,7 @@ def parse_args():
     )
     parser.add_argument(
         "--overwrite",
-        action="store_true",
+        default=True,
         help="Overwrite the output directory if it already exists.",
     )
     return parser.parse_args()
